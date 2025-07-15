@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stocks Data</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        .form-container {
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: center;
+            background-color: #fff;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        th {
+            background-color: #007bff;
+            color: white;
+            text-transform: uppercase;
+        }
+
+        tr {
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:hover {
+            background-color: #f1f1f1;
+            transform: scale(1.02);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .pagination {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .pagination a {
+            margin: 0 5px;
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+        }
+
+        .pagination a:hover {
+            background-color: #0056b3;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        button:hover {
+            background-color: #0056b3;
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2), 0 2px 4px rgba(0, 0, 0, 0.2);
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(1px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        canvas {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stocks Data</h1>
+
+    <!-- Form to filter the table data -->
+    <div class="form-container">
+        <form id="filterForm">
+            <label for="symbol">Filter by Symbol:</label>
+            <select name="symbol" id="symbol">
+                <option value="">All</option>
+                {% for symbol in unique_symbols %}
+                <option value="{{ symbol }}">{{ symbol }}</option>
+                {% endfor %}
+            </select>
+    
+            <label for="start_date">Start Date:</label>
+            <input type="date" name="start_date" id="start_date">
+    
+            <label for="end_date">End Date:</label>
+            <input type="date" name="end_date" id="end_date">
+    
+            <label for="sort_order">Sort by Date:</label>
+            <select name="sort_order" id="sort_order">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+            </select>
+    
+            <button type="submit">Filter</button>
+        </form>
+    </div>
+
+    <!-- Table for displaying the stock data -->
+    <div id="tableContainer">
+        <!-- The table will be loaded dynamically here -->
+    </div>
+
+    <!-- Form to select graph data -->
+    <div class="form-container">
+        <form id="graphForm">
+            <label for="y_column">Select Y-axis Column:</label>
+            <select name="y_column" id="y_column">
+                <option value="">Select Column</option>
+                <option value="Open">Open</option>
+                <option value="High">High</option>
+                <option value="Low">Low</option>
+                <option value="Close">Close</option>
+                <option value="Volume">Volume</option>
+                <option value="Adj Close">Adj Close</option>
+            </select>
+    
+            <label for="selected_stocks">Select Stocks:</label>
+            <select name="selected_stocks" id="selected_stocks" multiple>
+                {% for symbol in unique_symbols %}
+                <option value="{{ symbol }}">{{ symbol }}</option>
+                {% endfor %}
+            </select>
+    
+            <button type="submit">Generate Graph</button>
+        </form>
+    </div>
+
+    <canvas id="stockChart" width="400" height="200"></canvas>
+
+    <script>
+        let stockChart = null;  // To hold the chart instance
+
+        // Handle the graph form submission via AJAX
+        document.getElementById('graphForm').addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent form from submitting the traditional way
+
+            const formData = new FormData(this);
+            const selectedStocks = [...formData.getAll('selected_stocks')];
+            const yColumn = formData.get('y_column');
+
+            if (!yColumn || selectedStocks.length === 0) {
+                alert('Please select at least one stock and a Y-axis column');
+                return;
+            }
+
+            // Send an AJAX request to fetch the graph data
+            fetch('/get-graph-data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    selected_stocks: selectedStocks,
+                    y_column: yColumn
+                }),
+            })
+            .then(response => response.json())
+            .then(graphData => {
+                updateGraph(graphData, yColumn);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        });
+
+        // Function to update the graph with new data
+        function updateGraph(graphData, yColumn) {
+            const ctx = document.getElementById('stockChart').getContext('2d');
+            const datasets = [];
+            let dates = [];
+
+            for (const stock in graphData) {
+                const stockData = graphData[stock];
+                if (stockData.length) {
+                    dates = stockData.map(row => row[0]); // Extract dates from the first column
+                    const values = stockData.map(row => row[1]); // Extract values based on selected y_column
+
+                    datasets.push({
+                        label: stock,
+                        data: values,
+                        borderColor: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 1)`,
+                        fill: false
+                    });
+                }
+            }
+
+            // If a chart already exists, destroy it before creating a new one
+            if (stockChart !== null) {
+                stockChart.destroy();
+            }
+
+            // Create a new chart
+            stockChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: yColumn
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Function to submit the table filter form via AJAX and update the table
+        document.getElementById('filterForm').addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent default form submission
+
+            const formData = new FormData(this);
+            const symbol = formData.get('symbol');
+            const startDate = formData.get('start_date');
+            const endDate = formData.get('end_date');
+            const sortOrder = formData.get('sort_order');
+
+            // Send an AJAX request to fetch the filtered table data
+            fetch('/filter-table', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    symbol: symbol,
+                    start_date: startDate,
+                    end_date: endDate,
+                    sort_order: sortOrder
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Update the table with the received HTML
+                document.getElementById('tableContainer').innerHTML = data.table_html;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        });
+
+        // Function to load table data with pagination
+        function loadTableData(page) {
+            const formData = new FormData(document.getElementById('filterForm'));
+            const symbol = formData.get('symbol');
+            const startDate = formData.get('start_date');
+            const endDate = formData.get('end_date');
+            const sortOrder = formData.get('sort_order');
+
+            // Send an AJAX request to fetch the table data for the selected page
+            fetch('/filter-table', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    symbol: symbol,
+                    start_date: startDate,
+                    end_date: endDate,
+                    sort_order: sortOrder,
+                    page: page
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Update the table with the received HTML
+                document.getElementById('tableContainer').innerHTML = data.table_html;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>
